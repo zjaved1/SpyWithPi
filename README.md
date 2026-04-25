@@ -425,41 +425,6 @@ aircrack-ng -w /tmp/wordlist.txt /tmp/capture/capture-01.cap
 
 ---
 
-## Hardware & Software Stack
-
-| Component | Details |
-|---|---|
-| Host OS | Ubuntu 24.04 LTS (build environment) |
-| Hypervisor | VMware Workstation |
-| Custom OS | SpyWithPi (Linux From Scratch 12.4) |
-| Kernel | Linux 6.16.1 |
-| Init System | SysVinit with custom startup scripts |
-| C Library | GNU C Library (glibc) 2.42 |
-| Compiler | GCC 15.2.0 |
-| WiFi Adapter | Alfa AWUS036ACH (RTL8812AU chipset) |
-| WiFi Driver | rtw88_8812au (mainline since kernel 6.14) |
-| Pentest Suite | aircrack-ng 1.7 |
-| Custom Syscall | #548 sys_spywithpi |
-
----
-
-## Key OS Concepts Demonstrated
-
-| Concept | Implementation |
-|---|---|
-| **Bootstrapping** | Built a compiler using a compiler to build a new system |
-| **Cross compilation** | Built tools targeting a different environment (LFS_TGT) |
-| **Chroot environments** | Isolated build environment using chroot |
-| **Kernel compilation** | Compiled Linux 6.16.1 from source with custom config |
-| **System calls** | Added custom syscall #548 to kernel syscall table |
-| **Kernel modules** | Compiled RTW88 WiFi driver as loadable kernel module |
-| **Init systems** | Configured SysVinit with custom rc.d startup scripts |
-| **Device drivers** | Enabled and loaded Realtek RTL8812AU WiFi driver |
-| **File systems** | Created and managed ext4 partitions |
-| **Package management** | Manually compiled and installed 80+ packages in order |
-
----
-
 ## References
 
 ### Books & Official Documentation
