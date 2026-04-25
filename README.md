@@ -1,6 +1,6 @@
 # SpyWithPi
 
-> A minimal Linux OS built completely from scratch, featuring a custom kernel syscall and deployed as a penetration testing platform.
+A minimal Linux OS built completely from scratch, featuring a custom kernel syscall and deployed as a penetration testing platform.
 
 ---
 
