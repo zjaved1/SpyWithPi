@@ -4,7 +4,7 @@
 
 ---
 
-## 📌 Project Overview
+## Project Overview
 
 SpyWithPi is a fully custom Linux operating system built from source code using the **Linux From Scratch (LFS) 12.4** methodology. The project demonstrates deep understanding of operating systems by building every component from scratch, modifying the Linux kernel with a custom system call, and deploying a penetration testing suite natively on the custom OS.
 
@@ -14,7 +14,7 @@ Most people install Linux. I **built** Linux. Every binary, every library, every
 
 ---
 
-## 🏗️ System Architecture
+##  System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -83,7 +83,7 @@ cd $LFS/sources
 wget https://www.linuxfromscratch.org/lfs/downloads/stable/md5sums \
     --directory-prefix=$LFS/sources
 md5sum -c md5sums 2>&1 | grep -v OK
-# No output = all 95 files verified ✅
+# No output = all 95 files verified 
 ```
 
 ### Phase 3 — Creating the LFS User and Build Environment
@@ -203,11 +203,11 @@ make olddefconfig
 
 # Verify driver is enabled
 grep RTW88_8812AU .config
-# CONFIG_RTW88_8812AU=m ✅
+# CONFIG_RTW88_8812AU=m 
 
 # Compile the kernel using all 4 CPU cores (~30 minutes)
 make -j4
-# Output: Kernel: arch/x86/boot/bzImage is ready (#5) ✅
+# Output: Kernel: arch/x86/boot/bzImage is ready (#5) 
 
 # Install kernel and modules
 cp -f arch/x86/boot/bzImage /boot/vmlinuz-6.16.1-lfs
@@ -247,10 +247,10 @@ A system call is the interface between user programs and the kernel. When a prog
 ```
 User Program                    Kernel Space
 -----------                     ------------
-calls syscall(548)    ────────▶  sys_spywithpi()
+calls syscall(548)    ────────>  sys_spywithpi()
                                  executes kernel code
                                  prints to kernel log
-                      ◀────────  returns 548
+                      <────────  returns 548
 receives return value
 ```
 
@@ -425,7 +425,7 @@ aircrack-ng -w /tmp/wordlist.txt /tmp/capture/capture-01.cap
 
 ---
 
-## 📦 Hardware & Software Stack
+## Hardware & Software Stack
 
 | Component | Details |
 |---|---|
@@ -443,7 +443,7 @@ aircrack-ng -w /tmp/wordlist.txt /tmp/capture/capture-01.cap
 
 ---
 
-## 📚 Key OS Concepts Demonstrated
+## Key OS Concepts Demonstrated
 
 | Concept | Implementation |
 |---|---|
@@ -460,7 +460,7 @@ aircrack-ng -w /tmp/wordlist.txt /tmp/capture/capture-01.cap
 
 ---
 
-## 📖 References
+## References
 
 ### Books & Official Documentation
 
@@ -590,13 +590,10 @@ aircrack-ng -w /tmp/wordlist.txt /tmp/capture/capture-01.cap
 
 ---
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - **Professor Neil Klingensmith** — for guidance and allowing this ambitious project
 
 
 ---
 
-*Built with ❤️, persistence, and many kernel panics by Zarar Javed — Spring 2026*
-
-*"The only way to truly understand Linux is to build it yourself."*
