@@ -5,8 +5,15 @@ A minimal Linux OS built completely from scratch, featuring a custom kernel sysc
 ---
 
 ## Project Overview
+For my COMP 410 final project I built a Linux operating system completely from scratch using the Linux From Scratch (LFS) guide. On top of that I added a custom system call to the kernel and installed aircrack-ng to use it as a penetration testing platform.
 
-SpyWithPi is a fully custom Linux operating system built from source code using the **Linux From Scratch (LFS) 12.4** methodology. The project demonstrates deep understanding of operating systems by building every component from scratch, modifying the Linux kernel with a custom system call, and deploying a penetration testing suite natively on the custom OS.
+I called it SpyWithPi because the original plan was to run it on a Raspberry Pi. That plan changed due to architecture compatibility issues (the Pi uses ARM, my build was x86), so the final demo runs in VMware. But the name stuck.
+
+The project has three main parts:
+
+1. **Linux From Scratch** — building an entire Linux system from source code, one package at a time
+2. **Custom kernel syscall** — modifying the Linux kernel to add a new system call (#548)
+3. **aircrack-ng** — compiled from source on the custom OS and used to crack a WPA2 WiFi password
 
 ### What makes this special?
 
@@ -14,63 +21,26 @@ Most people install Linux. I **built** Linux. Every binary, every library, every
 
 ---
 
-##  System Architecture
+## How I built it
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    SpyWithPi OS                     │
-│                                                     │
-│  ┌─────────────────┐    ┌───────────────────────┐   │
-│  │   User Space    │    │     Kernel Space      │   │
-│  │                 │    │                       │   │
-│  │  aircrack-ng    │    │  sys_spywithpi        │   │
-│  │  airodump-ng    │──> │  Syscall #548         │   │
-│  │  aireplay-ng    │    │                       │   │
-│  │  airmon-ng      │    │  Linux Kernel 6.16.1  │   │
-│  │  test_syscall   │    │  (custom compiled)    │   │
-│  └─────────────────┘    └───────────────────────┘   │
-│                                                     │
-│  ┌─────────────────────────────────────────────┐    │
-│  │              Hardware Layer                 │    │
-│  │  Alfa AWUS036ACH (Realtek RTL8812AU)        │    │
-│  │  Driver: rtw88_8812au (kernel built-in)     │    │
-│  │  Monitor Mode + Packet Injection            │    │
-│  └─────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────┘
-```
+### The setup
 
----
-
-## 🔧 Build Process — Step by Step
-
-### Phase 1 — Setting Up the Host Environment
-> References used: [1], [2], [16], [17]
+I used Ubuntu 24.04 running in VMware as my build host. I added a separate 20GB virtual disk specifically for the LFS system so it wouldn't interfere with Ubuntu.
 
 ```bash
-# Install required build tools on Ubuntu
-sudo apt-get install -y build-essential bison flex texinfo gawk \
-    wget curl gzip bzip2 xz-utils unzip libssl-dev libelf-dev bc git
-
 # Create and format the LFS partition
 sudo fdisk /dev/sdb
 sudo mkfs.ext4 /dev/sdb1
-
-# Mount and set environment variable
 sudo mkdir -p /mnt/lfs
 sudo mount /dev/sdb1 /mnt/lfs
 echo 'export LFS=/mnt/lfs' >> ~/.bashrc
-source ~/.bashrc
-
-# Create directory structure
-sudo mkdir -pv $LFS/{sources,tools,boot,etc,bin,sbin,lib,lib64,usr,var,tmp}
-sudo chmod 777 $LFS/sources
 ```
 
-### Phase 2 — Downloading Source Packages
-> References used: [1], [10], [17]
+### Downloading the sources
+
+LFS has an official package list with all the source tarballs you need. I downloaded all 95 of them and verified the checksums before starting.
 
 ```bash
-# Download the official LFS package list (~95 packages, ~582MB)
 wget https://www.linuxfromscratch.org/lfs/downloads/stable/wget-list \
     --directory-prefix=$LFS/sources
 
@@ -78,151 +48,89 @@ wget --input-file=$LFS/sources/wget-list \
     --continue \
     --directory-prefix=$LFS/sources
 
-# Verify all packages with checksums
-cd $LFS/sources
-wget https://www.linuxfromscratch.org/lfs/downloads/stable/md5sums \
-    --directory-prefix=$LFS/sources
+# Verify everything downloaded correctly
 md5sum -c md5sums 2>&1 | grep -v OK
-# No output = all 95 files verified 
+# no output = all good
 ```
 
-### Phase 3 — Creating the LFS User and Build Environment
-> References used: [1], [17]
+### Building the temporary toolchain
+
+This was the trickiest conceptual part. To build a Linux system you need a compiler, but the compiler on your host system might contaminate your build. So LFS has you build a temporary, isolated toolchain first. Basically building a compiler to build your actual compiler. This is the bootstrapping problem.
+
+The key packages are Binutils, GCC, and Glibc. You build them twice — once for the temporary toolchain, once for the real system.
 
 ```bash
-# Create dedicated build user (safety measure)
-sudo groupadd lfs
-sudo useradd -s /bin/bash -g lfs -m -k /dev/null lfs
-sudo passwd lfs
-sudo chown -v lfs $LFS/{usr,lib,var,etc,bin,sbin,tools,sources,lib64}
-
-# Switch to lfs user and configure environment
-su - lfs
-cat > ~/.bashrc << "EOF"
-set +h
-umask 022
-LFS=/mnt/lfs
-LC_ALL=POSIX
-LFS_TGT=$(uname -m)-lfs-linux-gnu
-PATH=/usr/bin:/bin:/mnt/lfs/tools/bin
-CONFIG_SITE=$LFS/usr/share/config.site
-export LFS LC_ALL LFS_TGT PATH CONFIG_SITE
-EOF
-source ~/.bash_profile
-```
-
-### Phase 4 — Building the Temporary Toolchain
-> References used: [1], [12], [13], [17]
-
-The temporary toolchain is a self-contained compiler environment that prevents host system contamination. This is the bootstrapping phase — using an existing compiler to build a new compiler.
-
-```bash
-# Binutils Pass 1 (assembler and linker)
+# Binutils pass 1
 cd $LFS/sources && tar -xf binutils-2.45.tar.xz && cd binutils-2.45
 mkdir -v build && cd build
 ../configure --prefix=$LFS/tools --with-sysroot=$LFS \
-    --target=$LFS_TGT --disable-nls --enable-gprofng=no --disable-werror
+    --target=$LFS_TGT --disable-nls
 make && make install
 
-# GCC Pass 1 (C/C++ compiler)
+# GCC pass 1
 cd $LFS/sources && tar -xf gcc-15.2.0.tar.xz && cd gcc-15.2.0
 tar -xf ../mpfr-4.2.2.tar.xz && mv mpfr-4.2.2 mpfr
 tar -xf ../gmp-6.3.0.tar.xz  && mv gmp-6.3.0 gmp
 tar -xf ../mpc-1.3.1.tar.gz  && mv mpc-1.3.1 mpc
 mkdir -v build && cd build
 ../configure --target=$LFS_TGT --prefix=$LFS/tools \
-    --with-newlib --without-headers --enable-languages=c,c++ \
-    --disable-nls --disable-shared --disable-multilib
+    --with-newlib --without-headers --enable-languages=c,c++
 make && make install
 
-# Linux API Headers
-tar -xf linux-6.16.1.tar.xz && cd linux-6.16.1
-make mrproper && make headers
-cp -rv usr/include $LFS/usr
-
-# Glibc (C standard library)
-tar -xf glibc-2.42.tar.xz && cd glibc-2.42
-patch -Np1 -i ../glibc-2.42-fhs-1.patch
-mkdir -v build && cd build
-../configure --prefix=/usr --host=$LFS_TGT \
-    --enable-kernel=4.19 --with-headers=$LFS/usr/include
-make && make DESTDIR=$LFS install
-
-# Verify toolchain works correctly
+# Verify the toolchain works
 echo 'int main(){}' | $LFS_TGT-gcc -xc -
 readelf -l a.out | grep ld-linux
-# Expected: [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]
+# [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]
 ```
 
-### Phase 5 — Entering Chroot and Building the Real System
-> References used: [1], [11], [17]
+### Entering chroot and building the real system
+
+Once the temporary toolchain was done I mounted the virtual filesystems and entered a chroot environment — stepping inside the half-built LFS system.
 
 ```bash
-# Mount virtual kernel filesystems
 sudo mount -v --bind /dev $LFS/dev
-sudo mount -vt devpts devpts $LFS/dev/pts
 sudo mount -vt proc proc $LFS/proc
 sudo mount -vt sysfs sysfs $LFS/sys
 sudo mount -vt tmpfs tmpfs $LFS/run
 
-# Enter the chroot environment (step inside our new Linux!)
 sudo chroot "$LFS" /usr/bin/env -i \
     HOME=/root TERM="$TERM" \
     PS1='(lfs chroot) \u:\w\$ ' \
     PATH=/usr/bin:/usr/sbin \
     MAKEFLAGS="-j4" \
     /bin/bash --login
-
-# Create essential system files
-cat > /etc/passwd << "EOF"
-root:x:0:0:root:/root:/bin/bash
-bin:x:1:1:bin:/dev/null:/usr/bin/false
-nobody:x:65534:65534:Unprivileged User:/dev/null:/usr/bin/false
-EOF
-
-# Build all 80+ packages automatically
-bash /sources/buildall.sh
-# Successfully compiled 58+ packages including:
-# bash, coreutils, gcc, glibc, openssl, python, perl, vim, systemd...
 ```
 
-### Phase 6 — Building the Linux Kernel
-> References used: [5], [1], [7], [18], [19]
+From inside chroot I compiled about 80 packages. I wrote a build script (`scripts/buildall.sh`) to automate this since doing it manually for each package would take forever.
+
+### Compiling the kernel
 
 ```bash
 cd /sources/linux-6.16.1
 make mrproper
 make defconfig
 
-# Enable Realtek RTW88 8812AU WiFi driver for Alfa adapter
+# Enable the Alfa AWUS036ACH WiFi adapter driver (RTL8812AU)
+# This chipset's driver was merged into mainline Linux in kernel 6.14
 scripts/config --enable RTW88
-scripts/config --enable RTW88_8812A
 scripts/config --module RTW88_8812AU
 scripts/config --enable RTW88_USB
 make olddefconfig
 
-# Verify driver is enabled
-grep RTW88_8812AU .config
-# CONFIG_RTW88_8812AU=m 
-
-# Compile the kernel using all 4 CPU cores (~30 minutes)
+# Compile using all 4 cores (~30 minutes)
 make -j4
-# Output: Kernel: arch/x86/boot/bzImage is ready (#5) 
 
-# Install kernel and modules
+# Install
 cp -f arch/x86/boot/bzImage /boot/vmlinuz-6.16.1-lfs
-cp -f System.map /boot/System.map-6.16.1
 make modules_install
 ```
 
-### Phase 7 — Setting Up the Bootloader (GRUB)
-> References used: [1], [20]
+### Setting up GRUB
 
 ```bash
-# Install GRUB to the LFS disk
-sudo grub-install --target=i386-pc --boot-directory=/mnt/lfs/boot /dev/sdb
+sudo grub-install --target=i386-pc \
+    --boot-directory=/mnt/lfs/boot /dev/sdb
 
-# Create GRUB configuration
 cat > /mnt/lfs/boot/grub/grub.cfg << "EOF"
 set default=0
 set timeout=5
@@ -235,43 +143,31 @@ menuentry "SpyWithPi LFS 6.16.1" {
 EOF
 ```
 
+Getting GRUB to find the right disk took a while. VMware kept assigning different device names (sda/sdb) to the disks depending on boot order.
+
 ---
 
-## ⚙️ Custom Kernel Syscall — Deep Dive
-> References used: [3], [4], [8], [9], [21], [22], [23]
+## The custom syscall
 
-### What is a System Call?
+A system call is how user programs talk to the kernel. When your program calls `read()` or `write()`, it's making a syscall. Linux has about 350 built-in syscalls. I added number 548 — `sys_spywithpi`.
 
-A system call is the interface between user programs and the kernel. When a program needs privileged operations (hardware access, memory management), it makes a system call. Linux has approximately 350 built-in syscalls. We added **#548**.
+### Adding the syscall
 
-```
-User Program                    Kernel Space
------------                     ------------
-calls syscall(548)    ────────>  sys_spywithpi()
-                                 executes kernel code
-                                 prints to kernel log
-                      <────────  returns 548
-receives return value
-```
+Three things need to happen:
 
-### Step 1 — Register in the Syscall Table
+**1. Register it in the syscall table**
 
 ```bash
-# Add to arch/x86/entry/syscalls/syscall_64.tbl
 echo "548    common    spywithpi    sys_spywithpi" \
     >> arch/x86/entry/syscalls/syscall_64.tbl
-
-# Add to kernel Makefile
-echo "obj-y += spywithpi.o" >> kernel/Makefile
 ```
 
-### Step 2 — Kernel Implementation (`kernel/spywithpi.c`)
+**2. Write the kernel function** (`kernel/spywithpi.c`)
 
 ```c
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
 #include <linux/utsname.h>
-#include <linux/sched.h>
 
 SYSCALL_DEFINE0(spywithpi)
 {
@@ -290,7 +186,17 @@ SYSCALL_DEFINE0(spywithpi)
 }
 ```
 
-### Step 3 — Userspace Test Program (`src/test_syscall.c`)
+**3. Add it to the kernel Makefile**
+
+```bash
+echo "obj-y += spywithpi.o" >> kernel/Makefile
+```
+
+Then recompile the kernel and the syscall is in there.
+
+### Testing it
+
+Small C program to call syscall #548 from userspace (`src/test_syscall.c`):
 
 ```c
 #include <stdio.h>
@@ -300,18 +206,13 @@ SYSCALL_DEFINE0(spywithpi)
 #define SYS_SPYWITHPI 548
 
 int main() {
-    printf("==========================================\n");
-    printf("   Calling SpyWithPi Syscall #548...\n");
-    printf("==========================================\n");
+    printf("Calling syscall #548...\n");
     long result = syscall(SYS_SPYWITHPI);
-    printf("   Syscall returned: %ld\n", result);
-    printf("   Check kernel log: dmesg | tail -20\n");
-    printf("==========================================\n");
+    printf("Returned: %ld\n", result);
+    printf("Check kernel log: dmesg | tail -20\n");
     return 0;
 }
 ```
-
-### Step 4 — Compile and Run
 
 ```bash
 gcc -o test_syscall test_syscall.c
@@ -319,32 +220,13 @@ gcc -o test_syscall test_syscall.c
 dmesg | tail -20
 ```
 
-**Output:**
-```
-==========================================
-   Calling SpyWithPi Syscall #548...
-==========================================
-[  96.130376] ==========================================
-[  96.130859]    SpyWithPi-ng
-[  96.131058]    Custom Kernel Syscall #548
-[  96.131391] ==========================================
-[  96.131716]    Student  : Zarar Javed
-[  96.131954]    Course   : COMP 410
-[  96.132181]    Professor: Neil Klingensmith
-[  96.132449] ==========================================
-[  96.132777]    Kernel   : 6.16.1
-[  96.132984]    Status   : ATTACK MODE INITIATED
-[  96.133294] ==========================================
-   Syscall returned: 548
-==========================================
-```
+The output in dmesg shows the kernel responding with the message from my kernel code. That part was really satisfying to see working.
 
 ---
 
-## Penetration Testing with aircrack-ng
-> References used: [6], [14], [15], [24], [25], [26]
+## aircrack-ng
 
-### Installing aircrack-ng from Source on SpyWithPi
+I compiled aircrack-ng 1.7 directly from source on SpyWithPi. This took longer than expected because I had to compile all the dependencies too (libnl, libusb, ethtool, iw, pciutils, usbutils) since SpyWithPi doesn't have a package manager.
 
 ```bash
 cd /sources
@@ -352,206 +234,166 @@ tar -xf aircrack-ng-1.7.tar.gz && cd aircrack-ng-1.7
 autoreconf -i
 ./configure --prefix=/usr --with-experimental
 make -j4 && make install
-
-# Verify installation
-aircrack-ng --help | head -3
-# Aircrack-ng 1.7 - (C) 2006-2022 Thomas d'Otreppe ✅
 ```
 
-### Complete WPA2 Attack Workflow
+### The WiFi adapter
+
+I used an Alfa AWUS036ACH with a Realtek RTL8812AU chipset. The key thing about this adapter is that its driver (`rtw88_8812au`) was merged into the mainline Linux kernel in version 6.14 — so on my kernel 6.16.1 it works without any external driver installation. Before 6.14 you had to use an out-of-kernel driver which was a mess to maintain.
+
+### Demo
 
 ```bash
-# Step 1 - Load WiFi driver
+# Load the WiFi driver
 modprobe rtw88_8812au
 
-# Step 2 - Verify adapter is detected
+# Check the adapter shows up
 airmon-ng
-# phy1  wlan0  rtw88_8812au  Realtek Semiconductor Corp. 
+# phy1  wlan0  rtw88_8812au  Realtek Semiconductor Corp.
 
-# Step 3 - Enable monitor mode
+# Enable monitor mode
 airmon-ng start wlan0
-# mac80211 monitor mode enabled 
 
-# Step 4 - Scan for target networks
+# Scan for networks
 airodump-ng wlan0
-# Shows all nearby WiFi networks with BSSID, channel, encryption
 
-# Step 5 - Target specific network and capture packets
+# Target a network on channel 6
 mount -o remount,rw /
 mkdir -p /tmp/capture
-airodump-ng -c [CHANNEL] --bssid [TARGET_BSSID] -w /tmp/capture/capture wlan0
-
-# Step 6 - Force WPA handshake (deauthentication attack)
-aireplay-ng -0 3 -a [TARGET_BSSID] wlan0
-
-# Step 7 - Crack the password with dictionary attack
-echo "12345" > /tmp/wordlist.txt
-aircrack-ng -w /tmp/wordlist.txt /tmp/capture/capture-01.cap
-# KEY FOUND! [ *** ]
-```
-
----
-
-## Full Demo Script (Presentation)
-
-```bash
-# === SpyWithPi Live Demo ===
-
-# 1. Show it's our custom system
-uname -a
-# Linux spywithpi 6.16.1 #5 SMP x86_64 GNU/Linux
-
-# 2. Run the custom kernel syscall
-cd /root && ./test_syscall
-# Syscall #548 responds from kernel space!
-
-# 3. Show WiFi adapter
-airmon-ng
-# wlan0  rtw88_8812au  Realtek Semiconductor Corp.
-
-# 4. Enable monitor mode
-airmon-ng start wlan0
-
-# 5. Scan for networks
-airodump-ng wlan0
-
-# 6. Capture WPA handshake
 airodump-ng -c 6 --bssid [BSSID] -w /tmp/capture/capture wlan0
 
-# 7. Crack password
-aircrack-ng -w /tmp/wordlist.txt /tmp/capture/capture-01.cap
+# Force a handshake with deauth
+aireplay-ng -0 3 -a [BSSID] wlan0
+
+# Crack it
+aircrack-ng -w wordlist.txt /tmp/capture/capture-01.cap
 # KEY FOUND! [ 12345 ]
 ```
 
 ---
 
+## Files in this repo
+
+```
+SpyWithPi/
+├── kernel/
+│   └── spywithpi.c       custom syscall kernel code
+├── src/
+│   └── test_syscall.c    userspace test program
+├── scripts/
+│   └── buildall.sh       automated build script
+└── README.md
+```
+
+The actual OS image is ~20GB so it can't be uploaded here.
+
+---
+
+## Hardware
+
+| Component | Details |
+|---|---|
+| Host machine | Windows laptop + VMware Workstation |
+| Build host | Ubuntu 24.04 LTS |
+| Custom OS | SpyWithPi (Linux From Scratch 12.4) |
+| Kernel | Linux 6.16.1 |
+| WiFi adapter | Alfa AWUS036ACH (RTL8812AU chipset) |
+| WiFi driver | rtw88_8812au (mainline since kernel 6.14) |
+
+---
+
+## Things that went wrong
+
+- **GRUB disk detection** — VMware kept swapping which disk was sda and which was sdb between reboots. Had to fix the GRUB config and fstab multiple times before it was reliable.
+
+- **aircrack-ng dependencies** — no package manager means tracking down and compiling libnl, libusb, usbutils, pciutils, ethtool, and iw manually before aircrack-ng would even configure.
+
+- **SSH attempt** — tried copying the sshd binary from Ubuntu into SpyWithPi to get a better terminal. That caused a kernel panic because Ubuntu's sshd links against different versions of libc. Had to restore from a disk image backup.
+
+- **WiFi firmware** — the RTL8812AU driver loaded fine but needed firmware (`rtw8812a_fw.bin`). Had to copy that from Ubuntu's `/lib/firmware/rtw88/` directory into SpyWithPi.
+
+- **Kernel panics** — had several during development, mostly from copying Ubuntu binaries into LFS that depended on libraries at different paths than what SpyWithPi had.
+
+---
+
 ## References
 
-### Books & Official Documentation
+### Linux From Scratch
 
-1. Beekmans, G., & Dubbs, B. (2025). *Linux From Scratch, Version 12.4.* The Linux From Scratch Project.  
-   https://www.linuxfromscratch.org/lfs/view/stable/  
-   **Used in:** Phase 1, 2, 3, 4, 5, 6, 7
+1. Beekmans, G., & Dubbs, B. (2025). *Linux From Scratch, Version 12.4.*  
+   https://www.linuxfromscratch.org/lfs/view/12.4/
 
-2. The Linux Kernel Documentation. (2024). *Adding a New System Call.*  
-   https://docs.kernel.org/process/adding-syscalls.html  
-   **Used in:** Phase 7 (Custom Syscall)
+2. Beekmans, G., & Dubbs, B. (2025). *Beyond Linux From Scratch, Version 12.4.*  
+   https://www.linuxfromscratch.org/blfs/view/stable/
 
-3. Linux Kernel Labs. (2024). *System Calls — The Linux Kernel.*  
-   https://linux-kernel-labs.github.io/refs/heads/master/lectures/syscalls.html  
-   **Used in:** Phase 7 (Custom Syscall)
+3. Tony. (2025). *Linux From Scratch — Full Build Tutorial.*  
+   https://www.tonybtw.com/tutorial/linux-from-scratch/
 
-4. aircrack-ng Project. (2022). *Aircrack-ng 1.7 Documentation.*  
-   https://www.aircrack-ng.org/documentation.html  
-   **Used in:** Phase 8 (Penetration Testing)
+4. LWN.net. (2025). *Linux From Scratch 12.4 released.*  
+   https://lwn.net/Articles/1036624/
 
-5. The Linux Kernel Archives. (2025). *Linux Kernel 6.16.1.*  
-   https://www.kernel.org/  
-   **Used in:** Phase 6 (Kernel Build)
+5. Wikipedia. (2025). *Linux from Scratch.*  
+   https://en.wikipedia.org/wiki/Linux_From_Scratch
 
-6. aircrack-ng Project. (2024). *Cracking WPA/WPA2.*  
-   https://www.aircrack-ng.org/doku.php?id=cracking_wpa  
-   **Used in:** Phase 8 (Penetration Testing)
+### Kernel / Syscalls
 
-### Research & Technical Articles
+6. The Linux Kernel Documentation. (2024). *Adding a New System Call.*  
+   https://docs.kernel.org/process/adding-syscalls.html
 
-7. morrownr. (2025). *USB WiFi Adapter Performance Comparison.* GitHub.  
-   https://github.com/morrownr/USB-WiFi  
-   **Used in:** Phase 6 (WiFi Driver Selection)
+7. Linux Kernel Labs. (2024). *System Calls.*  
+   https://linux-kernel-labs.github.io/refs/heads/master/lectures/syscalls.html
 
-8. Filippo, V. (2024). *Searchable Linux Syscall Table for x86_64.*  
-   https://filippo.io/linux-syscall-table/  
-   **Used in:** Phase 7 (Custom Syscall)
+8. Brennan, S. (2016). *Tutorial — Write a System Call.*  
+   https://brennan.io/2016/11/14/kernel-dev-ep3/
 
-9. UMBC CSEE. (2002). *Adding A System Call to Linux.*  
-   https://www.csee.umbc.edu/courses/undergraduate/CMSC421/fall02/burt/projects/howto_add_systemcall.html  
-   **Used in:** Phase 7 (Custom Syscall)
+9. Corbet, J. (2014). *Anatomy of a system call, part 1.* LWN.net.  
+   https://lwn.net/Articles/604287/
 
-10. Nistor, C. (2025, September 2). *Minimal distro Linux From Scratch 12.4 launches with 49 package updates and the 6.16.1 kernel.* NotebookCheck.  
-    https://www.notebookcheck.net/Minimal-distro-Linux-From-Scratch-12-4-launches-with-49-package-updates-and-the-6-16-1-kernel.1102629.0.html  
-    **Used in:** Phase 2 (Package versions reference)
+10. Al-rashid, J. J. (2020). *Adding A System Call To The Linux Kernel (5.8.1).* DEV Community.  
+    https://dev.to/jasper/adding-a-system-call-to-the-linux-kernel-5-8-1-in-ubuntu-20-04-lts-2ga8
 
-11. Dubbs, B. (2025). *Beyond Linux From Scratch, Version 12.4.*  
-    https://www.linuxfromscratch.org/blfs/view/stable/  
-    **Used in:** Phase 5 (Additional packages)
+11. Shrimal, A. (2018). *Adding a Hello World System Call to Linux Kernel.* Medium.  
+    https://medium.com/anubhav-shrimal/adding-a-hello-world-system-call-to-linux-kernel-dad32875872
 
-12. GNU Project. (2024). *GCC, the GNU Compiler Collection.*  
-    https://gcc.gnu.org/  
-    **Used in:** Phase 4 (Toolchain)
+12. Linux man-pages. (2026). *syscalls(2).*  
+    https://www.man7.org/linux/man-pages/man2/syscalls.2.html
 
-13. Free Software Foundation. (2024). *GNU C Library (glibc).*  
-    https://www.gnu.org/software/libc/  
-    **Used in:** Phase 4 (Toolchain)
+### aircrack-ng / WiFi
 
-14. aircrack-ng Project. (2024). *RTL8812AU Driver.* GitHub.  
-    https://github.com/aircrack-ng/rtl8812au  
-    **Used in:** Phase 6 & 8 (WiFi Driver)
+13. aircrack-ng Project. (2022). *Tutorial: How to crack WPA/WPA2.*  
+    https://www.aircrack-ng.org/doku.php?id=cracking_wpa
 
-15. Yupitek Ltd. (2026). *ALFA AWUS036ACH vs AWUS036ACM: Full Comparison for Kali Linux.*  
-    https://yupitek.com/en/blog/awus036ach-vs-awus036acm/  
-    **Used in:** Hardware Selection
+14. aircrack-ng Project. (2022). *Newbie guide.*  
+    https://www.aircrack-ng.org/doku.php?id=newbie_guide
 
-16. Wikipedia Contributors. (2025). *Linux from Scratch.* Wikipedia.  
-    https://en.wikipedia.org/wiki/Linux_from_Scratch  
-    **Used in:** Phase 1 (Background)
+15. josegpac. (2024). *Aircrack-ng for Beginners: Capturing WPA Handshakes.* Medium.  
+    https://medium.com/@josegpach/aircrack-ng-for-beginners-capturing-wpa-handshakes-and-cracking-with-a-custom-wordlist-c0762adfebff
 
-17. Tony. (2025, October 22). *How to Install Linux From Scratch.*  
-    https://www.tonybtw.com/tutorial/linux-from-scratch/  
-    **Used in:** Phase 1, 2, 3, 4
+16. GeeksforGeeks. (2025). *Capture Handshake Address with Airodump-ng and Aireplay-ng.*  
+    https://www.geeksforgeeks.org/linux-unix/capture-handshake-address-with-airodump-ng-and-aireplay-ng/
 
-18. Brennan, S. (2016). *Tutorial — Write a System Call.*  
-    https://brennan.io/2016/11/14/kernel-dev-ep3/  
-    **Used in:** Phase 7 (Custom Syscall)
+17. morrownr. (2025). *USB WiFi Adapters — Out-of-kernel drivers for Linux.* GitHub.  
+    https://github.com/morrownr/USB-WiFi/blob/main/home/USB_WiFi_Adapter_out-of-kernel_drivers_for_Linux.md
 
-19. Shrimal, A. (2018). *Adding a Hello World System Call to Linux Kernel.* Medium.  
-    https://medium.com/anubhav-shrimal/adding-a-hello-world-system-call-to-linux-kernel-dad32875872  
-    **Used in:** Phase 7 (Custom Syscall)
+18. morrownr. (2021). *Linux Driver for USB WiFi Adapters based on RTL8812AU.* GitHub.  
+    https://github.com/morrownr/8812au-20210820
 
-20. GNU Project. (2024). *GNU GRUB Manual.*  
-    https://www.gnu.org/software/grub/manual/grub/grub.html  
-    **Used in:** Phase 7 (Bootloader)
+19. aircrack-ng / morrownr. (2024). *Project: Add 8812au in-kernel drivers to Linux Mainline.* GitHub Issue #1218.  
+    https://github.com/aircrack-ng/rtl8812au/issues/1218
 
-21. Jasper. (2020). *Adding a System Call to The Linux Kernel (5.8.1).* DEV Community.  
-    https://dev.to/jasper/adding-a-system-call-to-the-linux-kernel-5-8-1-in-ubuntu-20-04-lts-2ga8  
-    **Used in:** Phase 7 (Custom Syscall)
+20. Linux Kernel Driver DataBase. (2025). *CONFIG_RTW88_8812AU.*  
+    https://cateee.net/lkddb/web-lkddb/RTW88.html
 
-22. The Linux Kernel Documentation. (2024). *System Calls.*  
-    https://www.kernel.org/doc/html/v4.12/process/adding-syscalls.html  
-    **Used in:** Phase 7 (Custom Syscall)
+### YouTube
 
-23. josegpac. (2024). *Aircrack-ng for Beginners: Capturing WPA Handshakes.* Medium.  
-    https://medium.com/@josegpach/aircrack-ng-for-beginners-capturing-wpa-handshakes-and-cracking-with-a-custom-wordlist-c0762adfebff  
-    **Used in:** Phase 8 (Penetration Testing)
+21. *Linux From Scratch — Full Build Guide (LFS 12.1).* YouTube.  
+    https://www.youtube.com/watch?v=L6EXaLt7SBE
 
-### YouTube Video References
+22. *Capturing Handshake With Airodump-ng | WPA/WPA2 Handshakes.* YouTube.  
+    https://www.youtube.com/watch?v=oRxdDxI_1iE
 
-24. *How to Create a Custom Linux System Call (Easy Kernel Dev Guide).* (2025, December 5). YouTube.  
-    https://www.youtube.com/watch?v=HbBblIT8tJ8  
-    **Used in:** Phase 7 (Custom Syscall implementation guide)
+23. *Adding a Custom System Call to the Linux Kernel.* YouTube.  
+    https://www.youtube.com/watch?v=HbBblIT8tJ8
 
-25. *1. Introduction — How to build Linux From Scratch (LFS) 12.1.* YouTube.  
-    https://www.youtube.com/watch?v=L6EXaLt7SBE  
-    **Used in:** Phase 1, 2, 3, 4, 5 (LFS build process)
-
-26. *How to Install Linux From Scratch.* (2025, October). YouTube.  
-    https://www.youtube.com/watch?v=DXUlaSYTLQI  
-    **Used in:** Phase 1, 2, 3, 4, 5 (LFS tutorial)
-
-27. *Capturing Handshake With Airodump-ng | WPA/WPA2 Handshakes.* (2024, October). YouTube.  
-    https://www.youtube.com/watch?v=oRxdDxI_1iE  
-    **Used in:** Phase 8 (Handshake capture)
-
-28. *Cracking WPA/WPA2 Handshake Files with Aircrack-ng & Hashcat.* (2025, August). YouTube.  
-    https://www.youtube.com/watch?v=L0czo6KF1O4  
-    **Used in:** Phase 8 (Password cracking)
-
-29. *Wireless Penetration Testing: Crack WPA2 Passwords with Aircrack-NG.* (2025, September). YouTube.  
-    https://www.youtube.com/watch?v=MYrMOlyYsyg  
-    **Used in:** Phase 8 (Penetration testing workflow)
-
-30. *LFS 12.0 — How to build Linux From Scratch 12.0 (Full Playlist).* YouTube.  
-    https://www.youtube.com/playlist?list=PLyc5xVO2uDsA5QPbtj_eYU8J0qrvU6315  
-    **Used in:** Phase 4, 5, 6 (Detailed build steps)
 
 ---
 
