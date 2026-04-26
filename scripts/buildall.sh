@@ -411,7 +411,3 @@ make && make install
 cd /sources && rm -rf sysvinit-3.14
 echo "✅ sysvinit done"
 
-echo ""
-echo "=== ALL PACKAGES COMPLETE: $(date) ==="
-echo "Now you need to build the Linux kernel manually!"
-zj@zj-VMware-Virtual-Platform:~$ 
