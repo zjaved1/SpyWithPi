@@ -101,7 +101,7 @@ sudo chroot "$LFS" /usr/bin/env -i \
     /bin/bash --login
 ```
 
-From inside chroot I compiled about 80 packages. I wrote a build script (`scripts/buildall.sh`) to automate this since doing it manually for each package would take forever.
+From inside chroot I compiled about 80 packages. I asked AI to a build script (`scripts/buildall.sh`) to automate this since doing it manually for each package would take forever.
 
 ### Compiling the kernel
 
@@ -285,19 +285,6 @@ SpyWithPi/
 ```
 
 The actual OS image is ~20GB so it can't be uploaded here.
-
----
-
-## Hardware
-
-| Component | Details |
-|---|---|
-| Host machine | Windows laptop + VMware Workstation |
-| Build host | Ubuntu 24.04 LTS |
-| Custom OS | SpyWithPi (Linux From Scratch 12.4) |
-| Kernel | Linux 6.16.1 |
-| WiFi adapter | Alfa AWUS036ACH (RTL8812AU chipset) |
-| WiFi driver | rtw88_8812au (mainline since kernel 6.14) |
 
 ---
 
