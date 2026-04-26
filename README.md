@@ -380,7 +380,8 @@ The actual OS image is ~20GB so it can't be uploaded here.
 
 23. *Adding a Custom System Call to the Linux Kernel.* YouTube.  
     https://www.youtube.com/watch?v=HbBblIT8tJ8
-
+24. *Build LFS Linux From Scratch tutorial part one.* Youtube.
+     https://www.youtube.com/watch?v=mnlPUjd7LwQ
 
 ---
 
